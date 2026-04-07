@@ -121,3 +121,5 @@ ios/Pods
 .turbo
 
 certs
+
+.claude/
