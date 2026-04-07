@@ -1,0 +1,7 @@
+<clickhouse>
+  <users>
+    <trench_admin>
+      <access_management>1</access_management>
+    </trench_admin>
+  </users>
+</clickhouse>
