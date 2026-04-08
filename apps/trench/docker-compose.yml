@@ -9,11 +9,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./:/app
-      - /app/node_modules
       - /app/certs
-      - /app/schemas
-      - /app/dist
     command: node /app/dist/main.js -i -1
     ports:
       - '127.0.0.1:${API_PORT}:${API_PORT}'
