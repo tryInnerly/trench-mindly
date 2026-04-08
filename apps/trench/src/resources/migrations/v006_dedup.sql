@@ -1,7 +1,9 @@
 -- 1. Drop materialized view (must happen before table drop)
 DROP TABLE IF EXISTS kafka_events_consumer_{kafka_instance_id};
 
--- 2. Drop events table (data is expendable)
+-- 2. Preserve old events data, then drop original table
+DROP TABLE IF EXISTS events_old;
+RENAME TABLE events TO events_old;
 DROP TABLE IF EXISTS events;
 
 -- 3. Recreate events with ReplacingMergeTree
@@ -68,10 +70,13 @@ CREATE TABLE events (
     c_ip String MATERIALIZED JSONExtractString(context, 'ip'),
     c_locale String MATERIALIZED JSONExtractString(context, 'locale'),
     c_user_agent String MATERIALIZED JSONExtractString(context, 'userAgent'),
-    c_device_type String MATERIALIZED JSONExtractString(context, 'device', 'type')
+    c_device_type String MATERIALIZED JSONExtractString(context, 'device', 'type'),
+
+    INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 4,
+    INDEX idx_timestamp timestamp TYPE minmax GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(parsed_at)
   PARTITION BY instance_id
-  ORDER BY (instance_id, user_id, timestamp, uuid)
+  ORDER BY (instance_id, uuid)
   SETTINGS index_granularity = 8192;
 
 -- 4. Recreate materialized view (same as v001, required because v001 won't re-run)
