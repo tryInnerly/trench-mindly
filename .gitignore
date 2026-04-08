@@ -123,3 +123,5 @@ ios/Pods
 certs
 
 .claude/
+PROGRESS.md
+.vscode/
