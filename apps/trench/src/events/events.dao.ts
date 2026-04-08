@@ -4,22 +4,44 @@ import { escapeString, formatToClickhouseDate } from 'src/services/data/click-ho
 import { Event, EventDTO, EventsQuery, PaginatedEventResponse } from 'src/events/events.interface'
 import { KafkaService } from 'src/services/data/kafka/kafka.service'
 import { KafkaEventWithUUID } from 'src/services/data/kafka/kafka.interface'
-import { v4 as uuidv4 } from 'uuid'
+import { v4 as uuidv4, v5 as uuidv5, validate as uuidValidate } from 'uuid'
 import { mapRowToEvent } from 'src/events/events.util'
 import { Workspace } from 'src/workspaces/workspaces.interface'
 import { getKafkaTopicFromWorkspace } from 'src/services/data/kafka/kafka.util'
 import { isReadOnlyQuery } from 'src/queries/queries.util'
 
+const MESSAGE_ID_NAMESPACE = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'
+
+function toUUID(messageId: string): string {
+  return uuidValidate(messageId) ? messageId : uuidv5(messageId, MESSAGE_ID_NAMESPACE)
+}
+
 @Injectable()
 export class EventsDao {
+  private seenMessages = new Map<string, number>()
+  private static readonly DEDUP_TTL_MS = 60_000
+  private static readonly CLEANUP_INTERVAL_MS = 30_000
+  private static readonly MAX_SEEN_SIZE = 100_000
+  private lastCleanup = Date.now()
+
   constructor(
     private readonly clickhouse: ClickHouseService,
     private kafkaService: KafkaService
   ) {}
 
+  private cleanupSeenMessages(): void {
+    const now = Date.now()
+    if (now - this.lastCleanup < EventsDao.CLEANUP_INTERVAL_MS) return
+    this.lastCleanup = now
+    const cutoff = now - EventsDao.DEDUP_TTL_MS
+    for (const [key, ts] of this.seenMessages) {
+      if (ts < cutoff) this.seenMessages.delete(key)
+    }
+  }
+
   async getEventsByUUIDs(workspace: Workspace, uuids: string[]): Promise<Event[]> {
     const escapedUUIDs = uuids.map((uuid) => `'${escapeString(uuid)}'`).join(', ')
-    const query = `SELECT * FROM events WHERE uuid IN (${escapedUUIDs})`
+    const query = `SELECT * FROM events FINAL WHERE uuid IN (${escapedUUIDs})`
     const result = await this.clickhouse.queryResults(query, workspace.databaseName)
     return result.map((row: any) => mapRowToEvent(row))
   }
@@ -99,11 +121,11 @@ export class EventsDao {
     const limitClause = `LIMIT ${maxRecords}`
     const offsetClause = offset ? `OFFSET ${offset}` : ''
 
-    const clickhouseQuery = `SELECT * FROM events ${whereClause} ${orderByClause} ${limitClause} ${offsetClause}`
+    const clickhouseQuery = `SELECT * FROM events FINAL ${whereClause} ${orderByClause} ${limitClause} ${offsetClause}`
     if (!isReadOnlyQuery(clickhouseQuery)) {
       throw new BadRequestException('The provided query is not read-only')
     }
-    const totalQuery = `SELECT COUNT(*) AS count FROM events ${whereClause}`
+    const totalQuery = `SELECT COUNT(*) AS count FROM events FINAL ${whereClause}`
 
     try {
       const [result, total] = await Promise.all([
@@ -125,8 +147,23 @@ export class EventsDao {
   }
 
   async createEvents(workspace: Workspace, eventDTOs: EventDTO[]): Promise<Event[]> {
-    const records: KafkaEventWithUUID[] = eventDTOs.map((eventDTO) => {
-      const uuid = uuidv4()
+    this.cleanupSeenMessages()
+    const now = Date.now()
+
+    const dedupedDTOs = eventDTOs.filter((dto) => {
+      if (!dto.messageId) return true
+      const cacheKey = `${workspace.workspaceId}:${dto.instanceId}:${dto.messageId}`
+      if (this.seenMessages.has(cacheKey)) return false
+      if (this.seenMessages.size < EventsDao.MAX_SEEN_SIZE) {
+        this.seenMessages.set(cacheKey, now)
+      }
+      return true
+    })
+
+    if (dedupedDTOs.length === 0) return []
+
+    const records: KafkaEventWithUUID[] = dedupedDTOs.map((eventDTO) => {
+      const uuid = eventDTO.messageId ? toUUID(eventDTO.messageId) : uuidv4()
       const row = {
         instance_id: eventDTO.instanceId,
         uuid,
@@ -146,7 +183,13 @@ export class EventsDao {
       }
     })
 
-    this.kafkaService.produceEvents(getKafkaTopicFromWorkspace(workspace), records)
+    this.kafkaService
+      .produceEvents(getKafkaTopicFromWorkspace(workspace), records)
+      .catch(() => {
+        for (const dto of dedupedDTOs) {
+          if (dto.messageId) this.seenMessages.delete(`${workspace.workspaceId}:${dto.instanceId}:${dto.messageId}`)
+        }
+      })
 
     return records.map((record) => mapRowToEvent(record.value))
   }
