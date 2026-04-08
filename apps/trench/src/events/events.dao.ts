@@ -34,7 +34,7 @@ export class EventsDao {
 
   async getEventsByUUIDs(workspace: Workspace, uuids: string[]): Promise<Event[]> {
     const escapedUUIDs = uuids.map((uuid) => `'${escapeString(uuid)}'`).join(', ')
-    const query = `SELECT * FROM events WHERE uuid IN (${escapedUUIDs})`
+    const query = `SELECT * FROM events FINAL WHERE uuid IN (${escapedUUIDs})`
     const result = await this.clickhouse.queryResults(query, workspace.databaseName)
     return result.map((row: any) => mapRowToEvent(row))
   }
@@ -114,11 +114,11 @@ export class EventsDao {
     const limitClause = `LIMIT ${maxRecords}`
     const offsetClause = offset ? `OFFSET ${offset}` : ''
 
-    const clickhouseQuery = `SELECT * FROM events ${whereClause} ${orderByClause} ${limitClause} ${offsetClause}`
+    const clickhouseQuery = `SELECT * FROM events FINAL ${whereClause} ${orderByClause} ${limitClause} ${offsetClause}`
     if (!isReadOnlyQuery(clickhouseQuery)) {
       throw new BadRequestException('The provided query is not read-only')
     }
-    const totalQuery = `SELECT COUNT(*) AS count FROM events ${whereClause}`
+    const totalQuery = `SELECT COUNT(*) AS count FROM events FINAL ${whereClause}`
 
     try {
       const [result, total] = await Promise.all([
