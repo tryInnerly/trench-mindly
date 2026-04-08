@@ -26,7 +26,7 @@ describe('EventsDao', () => {
       queryResults: jest.fn().mockResolvedValue([]),
     }
     mockKafkaService = {
-      produceEvents: jest.fn(),
+      produceEvents: jest.fn().mockResolvedValue(undefined),
     }
     dao = new EventsDao(mockClickhouse, mockKafkaService)
   })

@@ -15,6 +15,7 @@ export class EventsDao {
   private seenMessages = new Map<string, number>()
   private static readonly DEDUP_TTL_MS = 60_000
   private static readonly CLEANUP_INTERVAL_MS = 30_000
+  private static readonly MAX_SEEN_SIZE = 100_000
   private lastCleanup = Date.now()
 
   constructor(
@@ -146,14 +147,16 @@ export class EventsDao {
     const dedupedDTOs = eventDTOs.filter((dto) => {
       if (!dto.messageId) return true
       if (this.seenMessages.has(dto.messageId)) return false
-      this.seenMessages.set(dto.messageId, now)
+      if (this.seenMessages.size < EventsDao.MAX_SEEN_SIZE) {
+        this.seenMessages.set(dto.messageId, now)
+      }
       return true
     })
 
     if (dedupedDTOs.length === 0) return []
 
     const records: KafkaEventWithUUID[] = dedupedDTOs.map((eventDTO) => {
-      const uuid = eventDTO.messageId ?? uuidv4()
+      const uuid = eventDTO.messageId || uuidv4()
       const row = {
         instance_id: eventDTO.instanceId,
         uuid,
@@ -173,7 +176,13 @@ export class EventsDao {
       }
     })
 
-    this.kafkaService.produceEvents(getKafkaTopicFromWorkspace(workspace), records)
+    this.kafkaService
+      .produceEvents(getKafkaTopicFromWorkspace(workspace), records)
+      .catch(() => {
+        for (const dto of dedupedDTOs) {
+          if (dto.messageId) this.seenMessages.delete(dto.messageId)
+        }
+      })
 
     return records.map((record) => mapRowToEvent(record.value))
   }
