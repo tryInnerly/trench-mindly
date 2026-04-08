@@ -4,11 +4,17 @@ import { escapeString, formatToClickhouseDate } from 'src/services/data/click-ho
 import { Event, EventDTO, EventsQuery, PaginatedEventResponse } from 'src/events/events.interface'
 import { KafkaService } from 'src/services/data/kafka/kafka.service'
 import { KafkaEventWithUUID } from 'src/services/data/kafka/kafka.interface'
-import { v4 as uuidv4 } from 'uuid'
+import { v4 as uuidv4, v5 as uuidv5, validate as uuidValidate } from 'uuid'
 import { mapRowToEvent } from 'src/events/events.util'
 import { Workspace } from 'src/workspaces/workspaces.interface'
 import { getKafkaTopicFromWorkspace } from 'src/services/data/kafka/kafka.util'
 import { isReadOnlyQuery } from 'src/queries/queries.util'
+
+const MESSAGE_ID_NAMESPACE = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'
+
+function toUUID(messageId: string): string {
+  return uuidValidate(messageId) ? messageId : uuidv5(messageId, MESSAGE_ID_NAMESPACE)
+}
 
 @Injectable()
 export class EventsDao {
@@ -146,9 +152,10 @@ export class EventsDao {
 
     const dedupedDTOs = eventDTOs.filter((dto) => {
       if (!dto.messageId) return true
-      if (this.seenMessages.has(dto.messageId)) return false
+      const cacheKey = `${workspace.workspaceId}:${dto.instanceId}:${dto.messageId}`
+      if (this.seenMessages.has(cacheKey)) return false
       if (this.seenMessages.size < EventsDao.MAX_SEEN_SIZE) {
-        this.seenMessages.set(dto.messageId, now)
+        this.seenMessages.set(cacheKey, now)
       }
       return true
     })
@@ -156,7 +163,7 @@ export class EventsDao {
     if (dedupedDTOs.length === 0) return []
 
     const records: KafkaEventWithUUID[] = dedupedDTOs.map((eventDTO) => {
-      const uuid = eventDTO.messageId || uuidv4()
+      const uuid = eventDTO.messageId ? toUUID(eventDTO.messageId) : uuidv4()
       const row = {
         instance_id: eventDTO.instanceId,
         uuid,
@@ -180,7 +187,7 @@ export class EventsDao {
       .produceEvents(getKafkaTopicFromWorkspace(workspace), records)
       .catch(() => {
         for (const dto of dedupedDTOs) {
-          if (dto.messageId) this.seenMessages.delete(dto.messageId)
+          if (dto.messageId) this.seenMessages.delete(`${workspace.workspaceId}:${dto.instanceId}:${dto.messageId}`)
         }
       })
 
