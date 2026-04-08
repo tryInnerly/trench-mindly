@@ -12,10 +12,25 @@ import { isReadOnlyQuery } from 'src/queries/queries.util'
 
 @Injectable()
 export class EventsDao {
+  private seenMessages = new Map<string, number>()
+  private static readonly DEDUP_TTL_MS = 60_000
+  private static readonly CLEANUP_INTERVAL_MS = 30_000
+  private lastCleanup = Date.now()
+
   constructor(
     private readonly clickhouse: ClickHouseService,
     private kafkaService: KafkaService
   ) {}
+
+  private cleanupSeenMessages(): void {
+    const now = Date.now()
+    if (now - this.lastCleanup < EventsDao.CLEANUP_INTERVAL_MS) return
+    this.lastCleanup = now
+    const cutoff = now - EventsDao.DEDUP_TTL_MS
+    for (const [key, ts] of this.seenMessages) {
+      if (ts < cutoff) this.seenMessages.delete(key)
+    }
+  }
 
   async getEventsByUUIDs(workspace: Workspace, uuids: string[]): Promise<Event[]> {
     const escapedUUIDs = uuids.map((uuid) => `'${escapeString(uuid)}'`).join(', ')
@@ -125,7 +140,19 @@ export class EventsDao {
   }
 
   async createEvents(workspace: Workspace, eventDTOs: EventDTO[]): Promise<Event[]> {
-    const records: KafkaEventWithUUID[] = eventDTOs.map((eventDTO) => {
+    this.cleanupSeenMessages()
+    const now = Date.now()
+
+    const dedupedDTOs = eventDTOs.filter((dto) => {
+      if (!dto.messageId) return true
+      if (this.seenMessages.has(dto.messageId)) return false
+      this.seenMessages.set(dto.messageId, now)
+      return true
+    })
+
+    if (dedupedDTOs.length === 0) return []
+
+    const records: KafkaEventWithUUID[] = dedupedDTOs.map((eventDTO) => {
       const uuid = eventDTO.messageId ?? uuidv4()
       const row = {
         instance_id: eventDTO.instanceId,
