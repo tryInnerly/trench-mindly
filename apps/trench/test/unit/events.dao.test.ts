@@ -19,7 +19,7 @@ describe('EventsDao', () => {
   let dao: EventsDao
   let mockClickhouse: any
   let mockKafkaService: any
-  const mockWorkspace = { isDefault: true, databaseName: 'test_db' } as any
+  const mockWorkspace = { workspaceId: 'ws-test', isDefault: true, databaseName: 'test_db' } as any
 
   beforeEach(() => {
     mockClickhouse = {
@@ -34,16 +34,17 @@ describe('EventsDao', () => {
   describe('createEvents - messageId as uuid', () => {
     test('messageId provided is used as uuid in the record', async () => {
       const messageId = 'deterministic-id-123'
+      const expectedUUID = '8a6b8cc2-c1ad-512e-935c-beb933863c5a' // uuidv5(messageId, DNS namespace)
       const result = await dao.createEvents(mockWorkspace, [
         makeEventDTO({ messageId }),
       ])
 
       expect(result).toHaveLength(1)
-      expect(result[0].uuid).toBe(messageId)
+      expect(result[0].uuid).toBe(expectedUUID)
 
       const producedRecords = mockKafkaService.produceEvents.mock.calls[0][1]
-      expect(producedRecords[0].uuid).toBe(messageId)
-      expect(producedRecords[0].value.uuid).toBe(messageId)
+      expect(producedRecords[0].uuid).toBe(expectedUUID)
+      expect(producedRecords[0].value.uuid).toBe(expectedUUID)
     })
 
     test('messageId not provided generates a valid uuidv4', async () => {
@@ -79,8 +80,8 @@ describe('EventsDao', () => {
       ])
 
       expect(result).toHaveLength(2)
-      expect(result[0].uuid).toBe('msg-aaa')
-      expect(result[1].uuid).toBe('msg-bbb')
+      expect(result[0].uuid).toBe('33d98225-39a4-543b-b630-fa43b9b3322c') // uuidv5('msg-aaa')
+      expect(result[1].uuid).toBe('e3e0fe53-832f-564b-8425-2db24fe6cf20') // uuidv5('msg-bbb')
     })
 
     test('empty array after dedup returns [] and does not call produceEvents', async () => {
@@ -99,14 +100,15 @@ describe('EventsDao', () => {
 
     test('cleanup removes entries older than TTL', async () => {
       const messageId = 'old-msg-001'
+      const cacheKey = `${mockWorkspace.workspaceId}:undefined:${messageId}`
 
       // First call to register the messageId
       await dao.createEvents(mockWorkspace, [makeEventDTO({ messageId })])
       expect(mockKafkaService.produceEvents).toHaveBeenCalledTimes(1)
 
-      // Manually set the seenMessages entry to be older than TTL
+      // Manually age out the actual cache entry
       const seenMessages = (dao as any).seenMessages as Map<string, number>
-      seenMessages.set(messageId, Date.now() - 120_000) // 2 minutes ago
+      seenMessages.set(cacheKey, Date.now() - 120_000) // 2 minutes ago
 
       // Force lastCleanup to be old enough to trigger cleanup
       ;(dao as any).lastCleanup = Date.now() - 60_000
@@ -117,7 +119,7 @@ describe('EventsDao', () => {
       ])
 
       expect(result).toHaveLength(1)
-      expect(result[0].uuid).toBe(messageId)
+      expect(result[0].uuid).toBe('ed950256-c2ff-5643-a370-3784ab5a18c3') // uuidv5('old-msg-001')
       expect(mockKafkaService.produceEvents).toHaveBeenCalledTimes(2)
     })
   })
