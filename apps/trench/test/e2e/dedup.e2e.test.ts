@@ -38,6 +38,11 @@ describe('events/ deduplication', () => {
     expect(secondRes.statusCode).toEqual(201)
     expect(secondRes.body.results).toHaveLength(0)
     expect(secondRes.body.total).toEqual(0)
+
+    // Verify only one event persisted in ClickHouse
+    const queryResults = await waitForQueryResults(`uuid=${messageId}`)
+    expect(queryResults.results).toHaveLength(1)
+    expect(queryResults.results[0].uuid).toEqual(messageId)
   })
 
   test('should accept events with different messageIds', async () => {
