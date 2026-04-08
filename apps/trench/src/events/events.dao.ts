@@ -126,7 +126,7 @@ export class EventsDao {
 
   async createEvents(workspace: Workspace, eventDTOs: EventDTO[]): Promise<Event[]> {
     const records: KafkaEventWithUUID[] = eventDTOs.map((eventDTO) => {
-      const uuid = uuidv4()
+      const uuid = eventDTO.messageId ?? uuidv4()
       const row = {
         instance_id: eventDTO.instanceId,
         uuid,
