@@ -35,5 +35,4 @@ jobs:
             cd ${{ secrets.VPS_APP_DIR }}
             git pull origin main
             cd apps/trench
-            docker compose build --no-cache api
-            docker compose up -d api
+            docker compose up -d --build api
