@@ -44,6 +44,7 @@ services:
       - app-network
   kafka:
     image: bitnamilegacy/kafka:3.7.0
+    restart: unless-stopped
     expose:
       - '9092'
       - '9093'
