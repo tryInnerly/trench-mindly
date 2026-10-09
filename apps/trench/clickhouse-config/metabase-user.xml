@@ -1,7 +1,85 @@
 <clickhouse>
+  <!-- Overrides for the account the image entrypoint creates from CLICKHOUSE_USER.
+       Merged over users.d/default-user.xml, which the entrypoint writes.
+
+       THE FILE NAME IS MISLEADING AND KEPT ONLY TO AVOID A COMPOSE CHANGE.
+       Nothing here concerns Metabase. It configures the admin account, and the
+       name survives because renaming it means editing the bind mount in
+       docker-compose.yml, which recreates the ClickHouse container. Not worth an
+       interruption to ingest for a filename.
+
+       THE USER NAME IS HARD-CODED AND MUST MATCH CLICKHOUSE_USER. It already was
+       before this change. If they diverge, this file configures an account that
+       does not exist - silently, because ClickHouse does not warn about users.d
+       entries for unknown users - and the real admin account keeps the
+       entrypoint's defaults, which are the ones below that we are narrowing. -->
   <users>
     <trench_admin>
       <access_management>1</access_management>
+
+      <!-- WHERE THIS ACCOUNT MAY CONNECT FROM.
+           Added 2026-10-09. The entrypoint writes <ip>::/0</ip> - this account
+           is a superuser with grant_option authenticating by plaintext password,
+           and it was reachable from anywhere that could reach port 8123.
+
+           WHY IT MATTERS NOW. 8123 gained a second door: a systemd socket on the
+           host forwards the tailnet address to the container's loopback publish,
+           so the mindly-infra mesh can read ClickHouse (ACL
+           tag:funnels-analytics -> tag:trench:8123). Every ClickHouse account
+           authenticates on that port, so without this the mesh reached a
+           superuser's login prompt rather than the read-only account intended.
+
+           replace="replace" IS LOAD-BEARING. ClickHouse MERGES config trees, so
+           a second <networks> block without it APPENDS to the entrypoint's
+           ::/0 instead of replacing it. The config would load, read correctly,
+           and restrict nothing. Verify by behaviour, never by reading this file.
+
+           WHAT EACH ENTRY IS FOR, measured in system.query_log 2026-10-09:
+             host api        the Trench API, 93768 queries from 172.18.0.4.
+                             A NAME AND NOT AN ADDRESS: container IPs on a bridge
+                             network do not survive recreation. ClickHouse resolves
+                             this through Docker's embedded DNS, verified from
+                             inside the container: `getent hosts api` -> 172.18.0.4.
+             127.0.0.1, ::1  `docker exec ... clickhouse-client`, which is how this
+                             account is administered. 10 queries. Omitting these
+                             would lock the operator out of their own database.
+
+           WHAT IS DELIBERATELY ABSENT: 172.18.0.1, the bridge gateway. Everything
+           entering through the published port arrives from there - the mesh proxy,
+           and also `analytics` and `metabase`, which are read-only and unaffected
+           because this restriction names one account. That the gateway is shared
+           is why source cannot separate the mesh tenant from Metabase, and why
+           this is a restriction ON THE SUPERUSER rather than a boundary for the
+           tenant. The tenant's bound is its own grants.
+
+           A loopback-only restriction was the first thing proposed and would have
+           been wrong twice: it would have broken the API, which arrives from .4,
+           and excluded nothing, because the proxy arrives from .1 and not from
+           loopback.
+
+           WHEN THIS REJECTS SOMEBODY IT LOOKS LIKE A WRONG PASSWORD. Measured on
+           a throwaway 24.8 with these exact two files:
+
+             from a foreign address   Code: 516. DB::Exception: trench_admin:
+                                      Authentication failed: password is incorrect,
+                                      or there is no user with such name.
+             from loopback            works
+
+           ClickHouse deliberately does not say "network not allowed". So anyone
+           debugging a connection refused by this block will be looking at the
+           password, and the password will be correct. Check host_ip and
+           host_names in system.users before anything else:
+
+             SELECT name, host_ip, host_names FROM system.users
+
+           After this change that reads host_ip=[] and
+           host_names=['localhost','api'] - note that ClickHouse normalises the
+           two loopback literals below into the single name `localhost`. -->
+      <networks replace="replace">
+        <host>api</host>
+        <ip>127.0.0.1</ip>
+        <ip>::1</ip>
+      </networks>
     </trench_admin>
   </users>
 </clickhouse>
