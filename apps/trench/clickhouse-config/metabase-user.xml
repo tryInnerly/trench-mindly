@@ -2,9 +2,9 @@
   <!-- HOW TO APPLY THIS FILE, because "it is a bind mount, just edit it" is wrong.
        Docker binds a SINGLE FILE by INODE, not by path. So:
 
-         - editing in place (`cat >`, `sed -i` without a temp file, an editor that
+         - editing in place (`cat >`, `sed -i` without a temp file (GNU sed edits in place), an editor that
            truncates) keeps the inode and the container sees it at once;
-         - replacing it (`install`, `cp --remove-destination`, `mv`, most editors'
+         - replacing it (`install`, `cp` with remove-destination, `mv`, most editors'
            write-to-temp-then-rename) creates a NEW inode. The path and the
            container then point at different files, and every later edit to the
            path is invisible inside the container - silently, with no error.
