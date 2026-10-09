@@ -1,7 +1,71 @@
 <clickhouse>
+  <!-- Overrides for the account the image entrypoint creates from CLICKHOUSE_USER,
+       merged over users.d/default-user.xml.
+
+       HOW TO APPLY: after ANY change to this file, recreate the ClickHouse
+       container with compose, passing its force-recreate flag:
+
+           docker compose up -d clickhouse       (with that flag added)
+
+       Docker binds a single file by inode, and `git pull` replaces it, so the
+       running container keeps reading the old one. ClickHouse does reload
+       users.d on its own, but only for changes it can see. And a plain `up -d`
+       is not enough either: compose sees an unchanged service definition and
+       leaves the container alone.
+
+       THE USER NAME IS HARD-CODED AND MUST MATCH CLICKHOUSE_USER. It already was
+       before the networks block below. If they diverge, this file configures an
+       account that does not exist - silently - and the real admin account keeps
+       the entrypoint defaults, which are what this narrows.
+
+       The file name says metabase and has nothing to do with Metabase; renaming
+       it means editing the bind mount in docker-compose.yml. -->
   <users>
     <trench_admin>
       <access_management>1</access_management>
+
+      <!-- WHERE THIS ACCOUNT MAY CONNECT FROM.
+
+           The entrypoint writes <ip>::/0</ip>. This account is a superuser with
+           grant_option, and port 8123 now has a second door: a systemd socket on
+           the host forwards a tailnet address to the container loopback publish
+           so an internal mesh can read ClickHouse. Every account authenticates on
+           that port, so without this the mesh reached a superuser login prompt.
+
+           replace="replace" IS LOAD-BEARING. ClickHouse merges config trees, so a
+           second <networks> block without it APPENDS to ::/0 instead of replacing
+           it: the config loads, reads correctly, and restricts nothing.
+
+             host api        the Trench API. A NAME, not an address: container IPs
+                             on a bridge network do not survive recreation, and
+                             ClickHouse resolves this through Docker DNS.
+             127.0.0.1, ::1  `docker exec ... clickhouse-client`, which is how this
+                             account is administered.
+
+           Absent on purpose: 172.18.0.1, the bridge gateway, where everything
+           arriving through the published port comes from - the mesh proxy, and
+           also the read-only `analytics` and `metabase`, which this does not
+           touch.
+
+           A REJECTION HERE LOOKS LIKE A WRONG PASSWORD: "password is incorrect,
+           or there is no user with such name". Check the restriction before the
+           credential:
+
+             SELECT name, host_ip, host_names FROM system.users
+
+           Expected: host_ip=[] and host_names=['localhost','api'] - ClickHouse
+           normalises the two loopback literals into the name `localhost`.
+
+           WATCH THE FIRST DEPLOY AFTER THIS LANDS. Deploys recreate `api`, which
+           may come up on a different address, and ClickHouse caches DNS - so the
+           API can briefly get Authentication failed while the cache is stale.
+           Kafka buffers ingest meanwhile. If it recurs, pin the container with
+           ipv4_address in docker-compose.yml. -->
+      <networks replace="replace">
+        <host>api</host>
+        <ip>127.0.0.1</ip>
+        <ip>::1</ip>
+      </networks>
     </trench_admin>
   </users>
 </clickhouse>
