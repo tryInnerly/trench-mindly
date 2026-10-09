@@ -1,5 +1,25 @@
 <clickhouse>
-  <!-- Overrides for the account the image entrypoint creates from CLICKHOUSE_USER.
+  <!-- HOW TO APPLY THIS FILE, because "it is a bind mount, just edit it" is wrong.
+       Docker binds a SINGLE FILE by INODE, not by path. So:
+
+         - editing in place (`cat >`, `sed -i` without a temp file, an editor that
+           truncates) keeps the inode and the container sees it at once;
+         - replacing it (`install`, `cp --remove-destination`, `mv`, most editors'
+           write-to-temp-then-rename) creates a NEW inode. The path and the
+           container then point at different files, and every later edit to the
+           path is invisible inside the container - silently, with no error.
+
+       Measured on the host 2026-10-09 after replacing it with `install`:
+
+         path:       inode=2621574  size=134  mtime 2026-10-09
+         container:  inode=2621652  size=134  mtime 2026-04-08
+         a write that took the path to 149 bytes left the container reading 134
+
+       Recovering from that needs `docker compose up -d clickhouse`, which
+       recreates the container and re-resolves the mount. ClickHouse does reload
+       users.d on its own - but only for changes it can actually see.
+
+       Overrides for the account the image entrypoint creates from CLICKHOUSE_USER.
        Merged over users.d/default-user.xml, which the entrypoint writes.
 
        THE FILE NAME IS MISLEADING AND KEPT ONLY TO AVOID A COMPOSE CHANGE.
