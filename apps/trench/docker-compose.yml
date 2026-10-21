@@ -10,6 +10,7 @@ services:
       - .env
     volumes:
       - /app/certs
+      - /etc/ssl/certs:/etc/ssl/certs:ro
     command: node /app/dist/main.js -i -1
     ports:
       - '127.0.0.1:${API_PORT}:${API_PORT}'
@@ -21,6 +22,7 @@ services:
     restart: unless-stopped
     environment:
       - KAFKA_BROKERS=kafka:9092
+      - NODE_OPTIONS=--use-openssl-ca
   clickhouse:
     image: clickhouse/clickhouse-server:24.8
     restart: always
