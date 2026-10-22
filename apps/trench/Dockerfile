@@ -2,7 +2,7 @@
 # BUILD FOR LOCAL DEVELOPMENT
 ###################
 
-FROM node:22.9-bullseye AS build
+FROM node:22-bookworm AS build
 
 RUN apt-get update && apt-get install -y openssl certbot
 RUN npm install -g pnpm
@@ -39,7 +39,7 @@ USER node
 # BUILD FOR PRODUCTION
 ###################
 
-FROM node:22.9-bullseye AS production-build
+FROM node:22-bookworm AS production-build
 
 RUN apt-get update && apt-get install -y openssl certbot
 RUN npm install -g pnpm
@@ -69,7 +69,7 @@ ENV NODE_ENV production
 # PRODUCTION RUN
 ###################
 
-FROM node:22.9-bullseye AS production
+FROM node:22-bookworm AS production
 
 # RUN apt-get update && apt-get install -y openssl
 
