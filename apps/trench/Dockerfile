@@ -5,7 +5,7 @@
 FROM node:22-bookworm AS build
 
 RUN apt-get update && apt-get install -y openssl certbot
-RUN npm install -g pnpm
+RUN npm install -g pnpm@8.6.12
 
 # Create app directory
 WORKDIR /app
@@ -42,7 +42,7 @@ USER node
 FROM node:22-bookworm AS production-build
 
 RUN apt-get update && apt-get install -y openssl certbot
-RUN npm install -g pnpm
+RUN npm install -g pnpm@8.6.12
 
 WORKDIR /app
 
