@@ -1,0 +1,31 @@
+<clickhouse>
+  <!-- SERVER-WIDE MEMORY CEILING.
+
+       The default ratio is 0.9 of host RAM (~14 GB on the 16 GB droplet). But
+       ClickHouse shares the host with Kafka (4 GB limit), the Trench API and both
+       adapters, so the kernel runs out of memory before ClickHouse's own limit
+       is reached. The kernel then kills clickhouse-server outright instead of
+       ClickHouse cancelling one query with MEMORY_LIMIT_EXCEEDED.
+
+       2026-11-18 13:09 UTC: two ad-hoc analytics queries (a window function
+       over a week of page views) pushed RSS to 12.6 GB, the global OOM killer
+       took ClickHouse down, the API answered 500 for ~1 minute (it checks
+       api_keys in ClickHouse on every request) and adapters dropped ~3.8k events.
+
+       0.6 of 16 GB is ~9.4 GB: normal load sits around 2.5 GB, which leaves room
+       for merges and per-user query limits while keeping the host out of OOM.
+
+       HOW TO APPLY: this file is a new bind mount, so the container must be
+       recreated, not just restarted (see metabase-user.xml for why a plain
+       `up -d` is not enough):
+
+           docker compose up -d clickhouse    (with the force-recreate flag)
+
+       Later edits to the value are picked up by config reload, but git pull
+       replaces the file inode, so recreate after every change anyway.
+
+       Verify:
+           SELECT formatReadableSize(value::UInt64) FROM system.server_settings
+           WHERE name = 'max_server_memory_usage'                     -->
+  <max_server_memory_usage_to_ram_ratio>0.6</max_server_memory_usage_to_ram_ratio>
+</clickhouse>

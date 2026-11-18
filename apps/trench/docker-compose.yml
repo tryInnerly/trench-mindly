@@ -33,6 +33,7 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse # Data storage
       - ./clickhouse-config/metabase-user.xml:/etc/clickhouse-server/users.d/metabase-user.xml
+      - ./clickhouse-config/memory.xml:/etc/clickhouse-server/config.d/memory.xml:ro
 
       # - ./config:/etc/clickhouse-server # Configuration files (optional)
     environment:
